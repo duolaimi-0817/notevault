@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -20,12 +21,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-bk=qz=whj&53g^ftu-$*zv)$p*8trtzh*)+=)oq5l7i3isenrq"
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-bk=qz=whj&53g^ftu-$*zv)$p*8trtzh*)+=)oq5l7i3isenrq')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('true', '1', 'yes')
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', '*').split(',')
 
 
 # Application definition
@@ -78,19 +79,52 @@ WSGI_APPLICATION = "django_notevault.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'notevault',
-        'USER': 'root',
-        'PASSWORD': 'root',
-        'HOST': '127.0.0.1',
-        'PORT': '3306',
-        'OPTIONS': {
-            'charset': 'utf8mb4',
-        },
+if os.environ.get('DATABASE_URL'):
+    # Railway 部署：从环境变量读取数据库配置
+    import re
+    db_url = os.environ.get('DATABASE_URL')
+    # 解析 mysql://user:pass@host:port/dbname 格式
+    match = re.match(r'mysql://(\w+):([^@]+)@([^:]+):(\d+)/(\w+)', db_url)
+    if match:
+        DATABASES = {
+            'default': {
+                'ENGINE': 'django.db.backends.mysql',
+                'NAME': match.group(5),
+                'USER': match.group(1),
+                'PASSWORD': match.group(2),
+                'HOST': match.group(3),
+                'PORT': match.group(4),
+                'OPTIONS': {'charset': 'utf8mb4'},
+            }
+        }
+    else:
+        # 如果解析失败，使用 Railway 的独立环境变量
+        DATABASES = {
+            'default': {
+                'ENGINE': 'django.db.backends.mysql',
+                'NAME': os.environ.get('MYSQLDATABASE', 'notevault'),
+                'USER': os.environ.get('MYSQLUSER', 'root'),
+                'PASSWORD': os.environ.get('MYSQLPASSWORD', ''),
+                'HOST': os.environ.get('MYSQLHOST', '127.0.0.1'),
+                'PORT': os.environ.get('MYSQLPORT', '3306'),
+                'OPTIONS': {'charset': 'utf8mb4'},
+            }
+        }
+else:
+    # 本地开发：使用固定配置
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.mysql',
+            'NAME': 'notevault',
+            'USER': 'root',
+            'PASSWORD': 'root',
+            'HOST': '127.0.0.1',
+            'PORT': '3306',
+            'OPTIONS': {
+                'charset': 'utf8mb4',
+            },
+        }
     }
-}
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -127,6 +161,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
