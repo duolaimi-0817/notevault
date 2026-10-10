@@ -80,11 +80,38 @@ class NoteSerializer(serializers.ModelSerializer):
         write_only=True,
         source='tags'
     )
+    # 双向链接统计：列表接口由 with_link_counts() 注解提供；
+    # 未注解的单个对象场景退化为一次 count 查询（不存在 N+1）。
+    link_count = serializers.SerializerMethodField()
+    backlink_count = serializers.SerializerMethodField()
+    # 本次保存后解析不出的 [[标题]]（仅保存接口通过 context 传入，其余场景给默认值）
+    unresolved_link_count = serializers.SerializerMethodField()
+    unresolved_link_titles = serializers.SerializerMethodField()
 
     class Meta:
         model = Note
-        fields = ['id', 'title', 'content', 'category', 'category_name', 'tags', 'tag_ids', 'owner', 'is_pinned', 'create_at', 'update_at']
+        fields = ['id', 'title', 'content', 'category', 'category_name', 'tags', 'tag_ids',
+                  'owner', 'is_pinned', 'create_at', 'update_at',
+                  'link_count', 'backlink_count', 'unresolved_link_count', 'unresolved_link_titles']
         read_only_fields = ['owner', 'create_at', 'update_at', 'tags']
+
+    def get_link_count(self, obj):
+        annotated = getattr(obj, 'link_count', None)
+        if annotated is not None:
+            return annotated
+        return obj.outgoing_links.count()
+
+    def get_backlink_count(self, obj):
+        annotated = getattr(obj, 'backlink_count', None)
+        if annotated is not None:
+            return annotated
+        return obj.backlinks.filter(source__is_deleted=False).count()
+
+    def get_unresolved_link_count(self, obj):
+        return self.context.get('unresolved_link_count', 0)
+
+    def get_unresolved_link_titles(self, obj):
+        return self.context.get('unresolved_link_titles', [])
 
 class CategorySerializer(serializers.ModelSerializer):
     """分类序列化器，note_count统计该分类下有多少条笔记"""

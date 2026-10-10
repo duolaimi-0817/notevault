@@ -40,6 +40,18 @@
         </el-form-item>
       </el-form>
     </el-card>
+
+    <el-card v-if="isEdit" style="margin-top: 20px">
+      <template #header>
+        <span>反向链接（{{ backlinks.length }}）</span>
+      </template>
+      <el-empty v-if="backlinks.length === 0" description="暂无笔记引用当前笔记" :image-size="60" />
+      <div v-for="item in backlinks" :key="item.id" style="display: flex; align-items: center; gap: 8px; padding: 6px 0">
+        <el-link type="primary" :underline="false" @click="router.push(`/notes/${item.id}/edit`)">{{ item.title }}</el-link>
+        <el-tag v-if="item.is_deleted" size="small" type="info">回收站</el-tag>
+        <el-tag v-else-if="item.is_pinned" size="small" type="warning">已置顶</el-tag>
+      </div>
+    </el-card>
   </div>
 </template>
 
@@ -49,13 +61,14 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { MdEditor } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
-import { getNote, createNote, updateNote, getCategories, getTags } from '../api'
+import { getNote, createNote, updateNote, getCategories, getTags, getBacklinks } from '../api'
 
 const route = useRoute()
 const router = useRouter()
 const saving = ref(false)
 const categories = ref([])
 const tags = ref([])
+const backlinks = ref([])
 const isEdit = computed(() => !!route.params.id)
 
 // 自定义工具栏，保留常用功能
@@ -89,6 +102,12 @@ const loadNote = async () => {
   form.tag_ids = note.tags ? note.tags.map(t => t.id) : []
 }
 
+const loadBacklinks = async () => {
+  if (!route.params.id) return
+  const res = await getBacklinks(route.params.id)
+  backlinks.value = res.data
+}
+
 const handleSave = async () => {
   if (!form.title.trim()) { ElMessage.warning('请输入标题'); return }
   saving.value = true
@@ -112,7 +131,7 @@ const handleSave = async () => {
   }
 }
 
-onMounted(() => { loadCategories(); loadTags(); loadNote() })
+onMounted(() => { loadCategories(); loadTags(); loadNote(); loadBacklinks() })
 </script>
 
 <style scoped>

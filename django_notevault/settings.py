@@ -79,7 +79,19 @@ WSGI_APPLICATION = "django_notevault.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-if os.environ.get('DATABASE_URL'):
+# 数据库开关：
+# 1) NOTEVAULT_DB=sqlite 时使用本地 sqlite（仅供无 MySQL 的机器跑测试用，例如
+#    NOTEVAULT_DB=sqlite python manage.py test）；该变量缺省/为其它值时此分支不生效。
+# 2) DATABASE_URL 分支保持原有解析逻辑不变。
+# 3) 两者都不存在时，与历史行为完全等价：本地固定 MySQL 配置。
+if os.environ.get('NOTEVAULT_DB', '').lower() == 'sqlite':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
+elif os.environ.get('DATABASE_URL'):
     # Railway 部署：从环境变量读取数据库配置
     import re
     db_url = os.environ.get('DATABASE_URL')

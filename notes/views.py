@@ -11,6 +11,7 @@ from django.contrib.auth import authenticate
 
 from .models import Note, Category, Tag
 from .serializers import RegisterSerializer, LoginSerializer, NoteSerializer, CategorySerializer, TagSerializer
+from .links import sync_note_links, with_link_counts
 
 
 class RegisterView(APIView):
@@ -115,6 +116,9 @@ class NoteListView(APIView):
         if tag_id:
             notes = notes.filter(tags__id=tag_id)
 
+        # 链接统计走子查询注解，owner/category 走 join、tags 走 prefetch，杜绝 N+1
+        notes = with_link_counts(notes).select_related('owner', 'category').prefetch_related('tags')
+
         # 分页
         from django.core.paginator import Paginator
         page_size = request.query_params.get('page_size', 10)
@@ -148,8 +152,11 @@ class NoteListView(APIView):
     def post(self, request):
         serializer = NoteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        serializer.save(owner=request.user)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        note = serializer.save(owner=request.user)
+        # 保存正文后解析 [[标题]] 并重建出链，未解析标题随响应返回
+        link_result = sync_note_links(note)
+        data = NoteSerializer(note, context=link_result).data
+        return Response(data, status=status.HTTP_201_CREATED)
 
 
 class NoteImportView(APIView):
@@ -189,7 +196,9 @@ class NoteImportView(APIView):
             content=content,
             owner=request.user,
         )
-        serializer = NoteSerializer(note)
+        # 导入同样属于“保存正文”，需要解析 [[标题]] 出链
+        link_result = sync_note_links(note)
+        serializer = NoteSerializer(note, context=link_result)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
@@ -227,8 +236,11 @@ class NoteDetailView(APIView):
             return Response({'error': '笔记不存在'}, status=status.HTTP_404_NOT_FOUND)
         serializer = NoteSerializer(note, data=request.data)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data)
+        note = serializer.save()
+        # 正文可能变化，重新解析并重建出链，未解析标题随响应返回
+        link_result = sync_note_links(note)
+        data = NoteSerializer(note, context=link_result).data
+        return Response(data)
 
     def delete(self, request, pk):
         note = self.get_object(pk, request.user)
@@ -236,7 +248,36 @@ class NoteDetailView(APIView):
             return Response({'error': '笔记不存在'}, status=status.HTTP_404_NOT_FOUND)
         note.is_deleted = True
         note.save()
+        # 软删不触碰 NoteLink：关系保留，失效状态由 is_deleted 派生
+        # （它指向别人的出链仍在；别人指向它时不计入 backlink_count，但仍出现在 backlinks 列表并带 is_deleted=true）
         return Response({'message': '笔记已移入回收站。'}, status=status.HTTP_200_OK)
+
+
+class NoteBacklinksView(APIView):
+    """
+    反向引用列表。
+    GET /api/notes/<pk>/backlinks/ 返回引用该笔记的笔记。
+    - 只返回调用者自己的笔记；访问别人的笔记 pk（或不存在的 pk）一律 404，不泄露存在性；
+    - 已软删的引用方也返回，靠 is_deleted 字段区分；
+    - 排序 -is_pinned、-create_at；整条列表只有一次 SQL，无 N+1。
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        # 目标笔记包含软删：自有笔记即使在回收站也能查反向引用；非属主一律 404
+        target = Note.all_objects.filter(id=pk, owner=request.user).only('id').first()
+        if target is None:
+            return Response({'error': '笔记不存在'}, status=status.HTTP_404_NOT_FOUND)
+
+        # 引用方 = 出链（outgoing_links）指向 pk 的笔记；走 source 侧关系反查
+        referrers = (
+            Note.all_objects
+            .filter(owner=request.user, outgoing_links__target_id=pk)
+            .order_by('-is_pinned', '-create_at')
+            .distinct()
+            .values('id', 'title', 'create_at', 'is_pinned', 'is_deleted')
+        )
+        return Response(list(referrers))
 
 class CategoryView(APIView):
     """
@@ -299,6 +340,7 @@ class RecycleBinView(APIView):
     def get(self, request):
         # GET只需要列出已删除的笔记，不需要note_id
         notes = Note.all_objects.filter(owner=request.user, is_deleted=True)
+        notes = with_link_counts(notes).select_related('owner', 'category').prefetch_related('tags')
         serializer = NoteSerializer(notes, many=True)
         return Response(serializer.data)
 
@@ -317,9 +359,12 @@ class RecycleBinView(APIView):
         if action == 'restore':
             note.is_deleted = False
             note.save()
+            # 软删期间 NoteLink 从未删除，恢复后无需重建：
+            # 出链立即重新可见，指向它的 backlink_count 也随之恢复
             return Response({'message': '笔记已恢复'})
 
         elif action == 'delete':
+            # 彻底删除：source/target 两个外键都是 CASCADE，相关 NoteLink 由数据库级联清掉
             note.delete()
             return Response({'message': '笔记已彻底删除'}, status=status.HTTP_204_NO_CONTENT)
 
@@ -549,14 +594,20 @@ class BatchOperationView(APIView):
         if not notes.exists():
             return Response({'error': '未找到指定笔记'}, status=status.HTTP_404_NOT_FOUND)
 
+        # 显式说明（这里使用 queryset.update()，不会触发 model.save()/信号）：
+        # - delete 只改 is_deleted，NoteLink 一行都不动；链接是否失效在读取侧由
+        #   is_deleted 派生（backlink_count 子查询带 source__is_deleted=False 条件），
+        #   因此 update 后统计立即正确，不能也不需要依赖 save 钩子；
+        # - pin/unpin 与正文、链接无关，无需任何链接维护；
+        # - 链接解析只发生在“保存正文”的入口，批量操作不改正文，故不重算任何链接。
         if action == 'delete':
-            notes.update(is_deleted=True)
-            return Response({'message': f'已将 {notes.count()} 条笔记移至回收站'})
+            updated = notes.update(is_deleted=True)
+            return Response({'message': f'已将 {updated} 条笔记移至回收站'})
         elif action == 'pin':
-            notes.update(is_pinned=True)
-            return Response({'message': f'已置顶 {notes.count()} 条笔记'})
+            updated = notes.update(is_pinned=True)
+            return Response({'message': f'已置顶 {updated} 条笔记'})
         elif action == 'unpin':
-            notes.update(is_pinned=False)
-            return Response({'message': f'已取消 {notes.count()} 条笔记的置顶'})
+            updated = notes.update(is_pinned=False)
+            return Response({'message': f'已取消 {updated} 条笔记的置顶'})
         else:
             return Response({'error': '不支持的操作类型，可选 delete/pin/unpin'}, status=status.HTTP_400_BAD_REQUEST)

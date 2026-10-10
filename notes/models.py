@@ -199,3 +199,33 @@ class Note(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class NoteLink(models.Model):
+    """
+    笔记双向链接（正文里的 [[标题]] 解析而来）。
+    source：链接所在的笔记（出链方），通过 outgoing_links 访问它的全部出链。
+    target：被指向的笔记（入链方），通过 backlinks 访问指向它的全部反向引用。
+    任一笔记被彻底删除时，相关关系随 CASCADE 一起消失；软删（is_deleted）不删关系。
+    """
+    source = models.ForeignKey(
+        Note,
+        on_delete=models.CASCADE,
+        related_name='outgoing_links',
+        verbose_name='链接来源',
+    )
+    target = models.ForeignKey(
+        Note,
+        on_delete=models.CASCADE,
+        related_name='backlinks',
+        verbose_name='链接目标',
+    )
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+
+    class Meta:
+        verbose_name = '笔记链接'
+        verbose_name_plural = '笔记链接'
+        unique_together = ['source', 'target']
+
+    def __str__(self):
+        return f'{self.source_id} -> {self.target_id}'
