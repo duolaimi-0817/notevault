@@ -79,7 +79,16 @@ WSGI_APPLICATION = "django_notevault.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-if os.environ.get('DATABASE_URL'):
+if os.environ.get('USE_SQLITE'):
+    # 测试/无 MySQL 环境开关：USE_SQLITE=1 时使用内存 sqlite。
+    # 默认（该变量不存在时）行为与下列 MySQL 配置完全等价。
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': ':memory:',
+        }
+    }
+elif os.environ.get('DATABASE_URL'):
     # Railway 部署：从环境变量读取数据库配置
     import re
     db_url = os.environ.get('DATABASE_URL')

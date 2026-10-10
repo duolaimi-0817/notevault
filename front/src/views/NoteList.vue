@@ -269,7 +269,7 @@ const formatDate = (dateStr) => dateStr ? new Date(dateStr).toLocaleString('zh-C
 const stripMarkdown = (content) => {
   if (!content) return ''
   return content.replace(/#{1,6}\s/g, '').replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1')
-    .replace(/~~(.*?)~~/g, '$1').replace(/`(.*?)`/g, '$1').replace(/\[(.*?)\]\(.*?\)/g, '$1')
+    .replace(/~~(.*?)~~/g, '$1').replace(/`(.*?)`/g, '$1').replace(/\[\[(.*?)\]\]/g, '$1').replace(/\[(.*?)\]\(.*?\)/g, '$1')
     .replace(/!\[(.*?)\]\(.*?\)/g, '$1').replace(/>\s/g, '').replace(/[-*+]\s/g, '')
     .replace(/\d+\.\s/g, '').replace(/---/g, '').replace(/\n/g, ' ').trim().substring(0, 100)
 }

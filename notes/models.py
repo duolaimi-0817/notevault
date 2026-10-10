@@ -188,6 +188,8 @@ class Note(models.Model):
     update_at = models.DateTimeField('更新时间', auto_now=True)
     is_deleted = models.BooleanField(default=False, verbose_name='是否删除')
     is_pinned = models.BooleanField(default=False, verbose_name='是否置顶')
+    # 保存笔记时解析 [[标题]] 但无法解析到本用户笔记的原始标题文本（只在保存时更新）
+    broken_link_titles = models.JSONField('无法解析的链接标题', default=list, blank=True)
 
     class Meta:
         ordering = ['-is_pinned', '-create_at']  # 置顶优先，再按创建时间降序
@@ -199,3 +201,34 @@ class Note(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class NoteLink(models.Model):
+    """
+    笔记双向链接关系：source 正文里的 [[target.title]] 指向 target。
+    - source 出链：source.outgoing_links
+    - target 入链（反向引用）：target.incoming_links
+    关系是否失效不额外存储：source/target 任一方 is_deleted=True 即视为失效，
+    恢复后自动重新生效（见 notes/links.py 的统计注解）。
+    """
+    source = models.ForeignKey(
+        Note,
+        on_delete=models.CASCADE,
+        related_name='outgoing_links',
+        verbose_name='链接来源',
+    )
+    target = models.ForeignKey(
+        Note,
+        on_delete=models.CASCADE,
+        related_name='incoming_links',
+        verbose_name='链接目标',
+    )
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+
+    class Meta:
+        verbose_name = '笔记链接'
+        verbose_name_plural = '笔记链接'
+        unique_together = ['source', 'target']
+
+    def __str__(self):
+        return f'{self.source_id} -> {self.target_id}'

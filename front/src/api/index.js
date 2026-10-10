@@ -68,6 +68,9 @@ export const changePassword = (data) => request.post('/change-password/', data)
 // 置顶/取消置顶笔记
 export const pinNote = (id, isPinned) => request.post(`/notes/${id}/pin/`, { is_pinned: isPinned })
 
+// 获取笔记的反向链接列表
+export const getBacklinks = (id) => request.get(`/notes/${id}/backlinks/`)
+
 // 批量操作（delete/pin/unpin）
 export const batchOperate = (action, noteIds) => request.post('/notes/batch/', { action, note_ids: noteIds })
 

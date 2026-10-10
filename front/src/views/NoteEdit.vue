@@ -40,6 +40,25 @@
         </el-form-item>
       </el-form>
     </el-card>
+
+    <!-- 反向链接：仅编辑已有笔记时显示 -->
+    <el-card v-if="isEdit" style="margin-top: 20px">
+      <h3 style="margin-top: 0">反向链接</h3>
+      <el-empty v-if="backlinks.length === 0" description="暂无笔记引用当前笔记" :image-size="60" />
+      <ul v-else style="list-style: none; padding: 0; margin: 0">
+        <li
+          v-for="item in backlinks"
+          :key="item.id"
+          style="padding: 8px 0; border-bottom: 1px solid #ebeef5; cursor: pointer"
+          @click="router.push('/notes/' + item.id + '/edit')"
+        >
+          <el-icon v-if="item.is_pinned" color="#e6a23c" size="14" style="margin-right: 6px"><Top /></el-icon>
+          <span>{{ item.title }}</span>
+          <el-tag v-if="item.is_deleted" size="small" type="danger" style="margin-left: 8px">已删除</el-tag>
+          <span style="float: right; font-size: 12px; color: #999">{{ formatDate(item.create_at) }}</span>
+        </li>
+      </ul>
+    </el-card>
   </div>
 </template>
 
@@ -47,15 +66,17 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Top } from '@element-plus/icons-vue'
 import { MdEditor } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
-import { getNote, createNote, updateNote, getCategories, getTags } from '../api'
+import { getNote, createNote, updateNote, getCategories, getTags, getBacklinks } from '../api'
 
 const route = useRoute()
 const router = useRouter()
 const saving = ref(false)
 const categories = ref([])
 const tags = ref([])
+const backlinks = ref([])
 const isEdit = computed(() => !!route.params.id)
 
 // 自定义工具栏，保留常用功能
@@ -112,7 +133,15 @@ const handleSave = async () => {
   }
 }
 
-onMounted(() => { loadCategories(); loadTags(); loadNote() })
+const loadBacklinks = async () => {
+  if (!isEdit.value) return
+  const res = await getBacklinks(route.params.id)
+  backlinks.value = res.data
+}
+
+const formatDate = (dateStr) => dateStr ? new Date(dateStr).toLocaleString('zh-CN') : ''
+
+onMounted(() => { loadCategories(); loadTags(); loadNote(); loadBacklinks() })
 </script>
 
 <style scoped>

@@ -68,7 +68,9 @@ class NoteSerializer(serializers.ModelSerializer):
     笔记序列化器。
     read_only=True 的字段只能读不能写：
     - owner：自动设为当前登录用户，不允许前端指定
-    - created_at / updated_at：自动生成，不允许前端修改
+    - create_at / update_at：自动生成，不允许前端修改
+    - link_count / backlink_count：保存时由 ORM 聚合注解注入，见 notes.links.with_link_counts
+    - unresolved_link_count / unresolved_link_titles：保存时解析不出的 [[标题]] 信息
     """
     owner = serializers.ReadOnlyField(source='owner.phone')
     category_name = serializers.ReadOnlyField(source='category.name')
@@ -80,11 +82,35 @@ class NoteSerializer(serializers.ModelSerializer):
         write_only=True,
         source='tags'
     )
+    # 统计字段：正常查询路径由 with_link_counts 注解；getattr 兜底未注解场景，避免报错
+    link_count = serializers.SerializerMethodField()
+    backlink_count = serializers.SerializerMethodField()
+    unresolved_link_titles = serializers.ReadOnlyField(source='broken_link_titles')
+    unresolved_link_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Note
-        fields = ['id', 'title', 'content', 'category', 'category_name', 'tags', 'tag_ids', 'owner', 'is_pinned', 'create_at', 'update_at']
+        fields = ['id', 'title', 'content', 'category', 'category_name', 'tags', 'tag_ids', 'owner', 'is_pinned', 'create_at', 'update_at',
+                  'link_count', 'backlink_count', 'unresolved_link_count', 'unresolved_link_titles']
         read_only_fields = ['owner', 'create_at', 'update_at', 'tags']
+
+    def get_link_count(self, obj):
+        return getattr(obj, 'link_count', 0)
+
+    def get_backlink_count(self, obj):
+        return getattr(obj, 'backlink_count', 0)
+
+    def get_unresolved_link_count(self, obj):
+        return len(obj.broken_link_titles)
+
+
+class BacklinkSerializer(serializers.ModelSerializer):
+    """反向引用方笔记的精简序列化器（含已软删的引用方，用 is_deleted 标识）。"""
+
+    class Meta:
+        model = Note
+        fields = ['id', 'title', 'create_at', 'is_pinned', 'is_deleted']
+        read_only_fields = fields
 
 class CategorySerializer(serializers.ModelSerializer):
     """分类序列化器，note_count统计该分类下有多少条笔记"""
